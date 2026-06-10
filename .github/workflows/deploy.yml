@@ -1,0 +1,49 @@
+name: Deploy Model
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: ap-south-1
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install boto3 sagemaker==2.224.0 scikit-learn joblib pandera pandas
+
+    # ── Quality Gate ─────────────────────────────────────────────────────────
+    # Reads metrics.json from S3 (written by the training job) and exits
+    # non-zero if R² < 0.75 or RMSE > 0.65 — blocking deployment of bad models.
+    - name: Run model quality gate
+      env:
+        AWS_REGION: ap-south-1
+        S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        GATE_MIN_R2: "0.75"
+        GATE_MAX_RMSE: "0.65"
+      run: |
+        python scripts/evaluate_and_gate.py
+
+    # ── Deploy ───────────────────────────────────────────────────────────────
+    # Only reached if the quality gate step above exits 0.
+    - name: Deploy endpoint
+      env:
+        AWS_REGION: ap-south-1
+        SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+      run: |
+        python deploy_latest_model.py

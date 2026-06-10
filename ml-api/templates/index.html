@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LoanGuard — AI Loan Risk Assessment</title>
+  <meta name="description" content="Assess loan default risk instantly using an XGBoost model deployed on AWS SageMaker. Enter applicant financials and get a real-time default probability and risk tier." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Tokens ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep:      #050810;
+      --bg-surface:   #0c0f1e;
+      --bg-glass:     rgba(255,255,255,0.04);
+      --bg-glass-h:   rgba(255,255,255,0.07);
+      --border:       rgba(255,255,255,0.08);
+      --border-h:     rgba(255,255,255,0.16);
+
+      --blue:         #3b82f6;
+      --blue-light:   #60a5fa;
+      --green:        #10b981;
+      --amber:        #f59e0b;
+      --red:          #ef4444;
+      --purple:       #8b5cf6;
+      --purple-light: #a78bfa;
+
+      --text-primary:   #eef0f6;
+      --text-secondary: #8892a4;
+      --text-muted:     #4a5568;
+
+      --radius-sm: 10px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --shadow-card: 0 4px 40px rgba(0,0,0,0.6);
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Background orbs ─────────────────────────────────────────────── */
+    body::before, body::after {
+      content: ''; position: fixed; border-radius: 50%;
+      filter: blur(140px); pointer-events: none; z-index: 0;
+    }
+    body::before {
+      width: 700px; height: 700px; top: -250px; left: -250px;
+      background: radial-gradient(circle, rgba(59,130,246,0.10) 0%, transparent 70%);
+    }
+    body::after {
+      width: 500px; height: 500px; bottom: -200px; right: -150px;
+      background: radial-gradient(circle, rgba(16,185,129,0.08) 0%, transparent 70%);
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────────── */
+    .page-wrapper {
+      position: relative; z-index: 1;
+      max-width: 1120px; margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────── */
+    header { text-align: center; margin-bottom: 48px; }
+    .header-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.25);
+      border-radius: 999px; padding: 6px 16px;
+      font-size: 11px; font-weight: 600; color: var(--blue-light);
+      letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 20px;
+    }
+    .header-badge .dot {
+      width: 6px; height: 6px; background: var(--green);
+      border-radius: 50%; animation: pulse 2s ease-in-out infinite;
+    }
+    header h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      font-weight: 800; line-height: 1.1;
+      background: linear-gradient(135deg, #eef0f6 0%, #60a5fa 45%, #10b981 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    header p {
+      color: var(--text-secondary); margin-top: 12px;
+      font-size: 1rem; max-width: 540px; margin-inline: auto; line-height: 1.65;
+    }
+    .tech-pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+    .pill {
+      background: var(--bg-glass); border: 1px solid var(--border);
+      border-radius: 999px; padding: 4px 14px;
+      font-size: 11px; color: var(--text-secondary);
+    }
+
+    /* ── Main grid ───────────────────────────────────────────────────── */
+    .main-grid {
+      display: grid; grid-template-columns: 1fr 380px;
+      gap: 24px; align-items: start;
+    }
+    @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+
+    /* ── Glass card ──────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-glass); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 28px;
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      box-shadow: var(--shadow-card); transition: border-color 0.3s;
+    }
+    .card:hover { border-color: var(--border-h); }
+    .card-title {
+      font-family: 'Outfit', sans-serif; font-size: 0.8rem; font-weight: 600;
+      color: var(--text-secondary); text-transform: uppercase;
+      letter-spacing: 0.08em; margin-bottom: 22px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title::before {
+      content: ''; width: 3px; height: 14px;
+      background: var(--blue); border-radius: 99px;
+    }
+
+    /* ── Two-column input grid ───────────────────────────────────────── */
+    .input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 600px) { .input-grid { grid-template-columns: 1fr; } }
+
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label {
+      font-size: 11px; font-weight: 600; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .field-row {
+      display: flex; align-items: center;
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .field-row:focus-within {
+      border-color: var(--blue); background: rgba(59,130,246,0.06);
+    }
+    .field-row input[type="range"] {
+      flex: 1; -webkit-appearance: none; appearance: none;
+      height: 3px; background: var(--border); border-radius: 99px;
+      outline: none; margin: 0 12px; cursor: pointer;
+    }
+    .field-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 15px; height: 15px; background: var(--blue);
+      border-radius: 50%; cursor: pointer;
+      box-shadow: 0 0 8px rgba(59,130,246,0.5);
+    }
+    .field-row input[type="number"] {
+      width: 90px; background: transparent;
+      border: none; border-left: 1px solid var(--border);
+      color: var(--text-primary); font-family: 'Inter', monospace;
+      font-size: 13px; font-weight: 500; padding: 10px 12px; outline: none;
+    }
+    .field-row input[type="number"]::-webkit-inner-spin-button,
+    .field-row input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+    /* ── Submit button ───────────────────────────────────────────────── */
+    .btn-assess {
+      width: 100%; margin-top: 22px; padding: 15px;
+      background: linear-gradient(135deg, var(--blue) 0%, #1d4ed8 100%);
+      border: none; border-radius: var(--radius-sm);
+      color: #fff; font-family: 'Outfit', sans-serif;
+      font-size: 1rem; font-weight: 700; cursor: pointer;
+      letter-spacing: 0.03em; transition: transform 0.2s, box-shadow 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-assess:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(59,130,246,0.4); }
+    .btn-assess:active { transform: translateY(0); }
+    .btn-assess:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .btn-assess .spinner {
+      display: none; width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    .btn-assess.loading .spinner { display: block; }
+
+    /* ── Risk result panel ───────────────────────────────────────────── */
+    .result-panel { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+
+    /* Gauge */
+    .gauge-wrap { position: relative; width: 180px; height: 180px; }
+    .gauge-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .gauge-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 14; }
+    .gauge-fill {
+      fill: none; stroke: var(--blue); stroke-width: 14; stroke-linecap: round;
+      stroke-dasharray: 414; stroke-dashoffset: 414;
+      transition: stroke-dashoffset 1.2s cubic-bezier(0.34,1.56,0.64,1),
+                  stroke 0.6s ease;
+    }
+    .gauge-center {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 2px;
+    }
+    .gauge-pct {
+      font-family: 'Outfit', sans-serif; font-size: 2.4rem;
+      font-weight: 800; color: var(--text-primary); line-height: 1;
+      transition: color 0.6s;
+    }
+    .gauge-sub { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+    /* Risk badge */
+    .risk-badge {
+      padding: 7px 24px; border-radius: 999px;
+      font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 700;
+      letter-spacing: 0.04em; transition: all 0.5s;
+      background: var(--bg-glass); border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+
+    /* Insight box */
+    .insight-box {
+      width: 100%; background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 14px 16px; font-size: 13px; color: var(--text-secondary);
+      line-height: 1.6; min-height: 60px;
+      display: flex; align-items: center;
+    }
+
+    /* ── Stats bar ───────────────────────────────────────────────────── */
+    .stats-bar { display: flex; gap: 12px; width: 100%; margin-top: 4px; }
+    .stat-chip {
+      flex: 1; background: var(--bg-glass); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 12px; text-align: center;
+    }
+    .stat-chip .s-val {
+      font-family: 'Outfit', sans-serif; font-size: 1.25rem;
+      font-weight: 700; color: var(--blue-light);
+    }
+    .stat-chip .s-lbl {
+      font-size: 10px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px;
+    }
+
+    /* ── History ─────────────────────────────────────────────────────── */
+    .history-list { display: flex; flex-direction: column; gap: 8px; }
+    .history-item {
+      display: grid; grid-template-columns: 1fr auto;
+      align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 10px 14px;
+      transition: background 0.2s; animation: fadeIn 0.3s ease;
+    }
+    .history-item:hover { background: var(--bg-glass-h); }
+    .history-label { font-size: 13px; font-weight: 500; }
+    .history-meta  { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .history-prob  { font-family: 'Outfit', sans-serif; font-size: 1.3rem; font-weight: 700; }
+    .history-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 24px 0; }
+
+    /* ── Error toast ─────────────────────────────────────────────────── */
+    #error-toast {
+      position: fixed; bottom: 28px; right: 28px;
+      background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35);
+      border-radius: var(--radius-sm); padding: 14px 20px;
+      color: #fca5a5; font-size: 13px; max-width: 340px;
+      backdrop-filter: blur(12px); z-index: 1000;
+      opacity: 0; transform: translateY(12px);
+      transition: opacity 0.3s, transform 0.3s; pointer-events: none;
+    }
+    #error-toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ── Animations ──────────────────────────────────────────────────── */
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
+    @keyframes spin  { to { transform: rotate(360deg); } }
+    @keyframes fadeIn{ from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:translateY(0)} }
+  </style>
+</head>
+
+<body>
+<div class="page-wrapper">
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="header-badge"><span class="dot"></span> Live · AWS SageMaker Endpoint</div>
+    <h1>LoanGuard</h1>
+    <p>AI-powered loan default risk assessment. Enter applicant financials to get an instant default probability and risk classification.</p>
+    <div class="tech-pills">
+      <span class="pill">🏦 Home Credit Dataset (300k rows)</span>
+      <span class="pill">☁️ AWS SageMaker</span>
+      <span class="pill">📊 MLflow Tracking</span>
+      <span class="pill">🔍 Model Monitor + Drift Detection</span>
+    </div>
+  </header>
+
+  <!-- ── Main grid ── -->
+  <div class="main-grid">
+
+    <!-- Left: Form -->
+    <div>
+      <div class="card">
+        <div class="card-title">Applicant Information</div>
+
+        <form id="assess-form" novalidate>
+          <div class="input-grid">
+
+            <div class="field">
+              <label for="AMT_INCOME_TOTAL">Annual Income (₹)</label>
+              <div class="field-row">
+                <input type="range" id="sl-AMT_INCOME_TOTAL" min="25000" max="1000000" step="5000" value="180000" />
+                <input type="number" id="AMT_INCOME_TOTAL" name="AMT_INCOME_TOTAL" min="25000" max="1000000" step="1000" value="180000" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="AMT_CREDIT">Loan Amount (₹)</label>
+              <div class="field-row">
+                <input type="range" id="sl-AMT_CREDIT" min="50000" max="5000000" step="10000" value="450000" />
+                <input type="number" id="AMT_CREDIT" name="AMT_CREDIT" min="50000" max="5000000" step="1000" value="450000" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="AMT_ANNUITY">Annual Repayment (₹)</label>
+              <div class="field-row">
+                <input type="range" id="sl-AMT_ANNUITY" min="5000" max="200000" step="1000" value="22000" />
+                <input type="number" id="AMT_ANNUITY" name="AMT_ANNUITY" min="5000" max="200000" step="500" value="22000" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="AGE_YEARS">Age (years)</label>
+              <div class="field-row">
+                <input type="range" id="sl-AGE_YEARS" min="18" max="75" step="1" value="35" />
+                <input type="number" id="AGE_YEARS" name="AGE_YEARS" min="18" max="75" step="1" value="35" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="YEARS_EMPLOYED">Years Employed</label>
+              <div class="field-row">
+                <input type="range" id="sl-YEARS_EMPLOYED" min="0" max="40" step="0.5" value="5" />
+                <input type="number" id="YEARS_EMPLOYED" name="YEARS_EMPLOYED" min="0" max="40" step="0.5" value="5" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="EXT_SOURCE_2">Credit Score 2 (0–1)</label>
+              <div class="field-row">
+                <input type="range" id="sl-EXT_SOURCE_2" min="0" max="1" step="0.01" value="0.55" />
+                <input type="number" id="EXT_SOURCE_2" name="EXT_SOURCE_2" min="0" max="1" step="0.01" value="0.55" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="EXT_SOURCE_3">Credit Score 3 (0–1)</label>
+              <div class="field-row">
+                <input type="range" id="sl-EXT_SOURCE_3" min="0" max="1" step="0.01" value="0.50" />
+                <input type="number" id="EXT_SOURCE_3" name="EXT_SOURCE_3" min="0" max="1" step="0.01" value="0.50" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="DEBT_TO_INCOME">Debt-to-Income Ratio</label>
+              <div class="field-row">
+                <input type="range" id="sl-DEBT_TO_INCOME" min="0" max="5" step="0.01" value="0.12" />
+                <input type="number" id="DEBT_TO_INCOME" name="DEBT_TO_INCOME" min="0" max="5" step="0.01" value="0.12" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="CREDIT_TO_INCOME">Credit-to-Income Ratio</label>
+              <div class="field-row">
+                <input type="range" id="sl-CREDIT_TO_INCOME" min="0" max="20" step="0.1" value="2.5" />
+                <input type="number" id="CREDIT_TO_INCOME" name="CREDIT_TO_INCOME" min="0" max="20" step="0.1" value="2.5" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="CNT_CHILDREN">Number of Children</label>
+              <div class="field-row">
+                <input type="range" id="sl-CNT_CHILDREN" min="0" max="10" step="1" value="0" />
+                <input type="number" id="CNT_CHILDREN" name="CNT_CHILDREN" min="0" max="10" step="1" value="0" required />
+              </div>
+            </div>
+
+            <div class="field" style="grid-column: 1 / -1">
+              <label for="CNT_FAM_MEMBERS">Family Members</label>
+              <div class="field-row">
+                <input type="range" id="sl-CNT_FAM_MEMBERS" min="1" max="15" step="1" value="2" />
+                <input type="number" id="CNT_FAM_MEMBERS" name="CNT_FAM_MEMBERS" min="1" max="15" step="1" value="2" required />
+              </div>
+            </div>
+
+          </div>
+
+          <button type="submit" class="btn-assess" id="assess-btn">
+            <span class="spinner"></span>
+            Assess Default Risk
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Right: Result + History -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+
+      <!-- Risk gauge -->
+      <div class="card result-panel">
+        <div class="card-title">Risk Assessment</div>
+
+        <div class="gauge-wrap" aria-label="Default probability gauge">
+          <svg class="gauge-svg" viewBox="0 0 160 160" role="img">
+            <circle class="gauge-track" cx="80" cy="80" r="66" />
+            <circle class="gauge-fill" id="gauge-fill" cx="80" cy="80" r="66" />
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-pct" id="gauge-pct">—</div>
+            <div class="gauge-sub">Default Prob.</div>
+          </div>
+        </div>
+
+        <div class="risk-badge" id="risk-badge">Awaiting Assessment</div>
+
+        <div class="insight-box" id="insight-box">
+          Enter applicant details and click "Assess Default Risk" to get an AI prediction.
+        </div>
+
+        <div class="stats-bar">
+          <div class="stat-chip"><div class="s-val" id="s-total">0</div><div class="s-lbl">Assessed</div></div>
+          <div class="stat-chip"><div class="s-val" id="s-avg">—</div><div class="s-lbl">Avg Risk</div></div>
+          <div class="stat-chip"><div class="s-val" id="s-high">—</div><div class="s-lbl">High Risk</div></div>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="card">
+        <div class="card-title">Recent Assessments</div>
+        <div class="history-list" id="history-list">
+          <div class="history-empty" id="history-empty">No assessments yet</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div id="error-toast" role="alert" aria-live="polite"></div>
+
+<script>
+// ── Slider ↔ Number sync ──────────────────────────────────────────────────────
+const fields = [
+  'AMT_INCOME_TOTAL','AMT_CREDIT','AMT_ANNUITY','AGE_YEARS','YEARS_EMPLOYED',
+  'EXT_SOURCE_2','EXT_SOURCE_3','DEBT_TO_INCOME','CREDIT_TO_INCOME',
+  'CNT_CHILDREN','CNT_FAM_MEMBERS'
+];
+fields.forEach(name => {
+  const slider = document.getElementById('sl-' + name);
+  const num    = document.getElementById(name);
+  if (!slider || !num) return;
+  slider.addEventListener('input', () => { num.value = slider.value; });
+  num.addEventListener('input',   () => { slider.value = num.value; });
+});
+
+// ── Risk helpers ──────────────────────────────────────────────────────────────
+function riskConfig(prob) {
+  if (prob < 0.30) return {
+    stroke: '#10b981', badgeBg: 'rgba(16,185,129,0.12)', badgeBorder: '#10b981',
+    badgeColor: '#6ee7b7', label: '✅ Low Risk',
+    insight: 'Low default probability. Applicant profile is within acceptable credit risk parameters.'
+  };
+  if (prob < 0.60) return {
+    stroke: '#f59e0b', badgeBg: 'rgba(245,158,11,0.12)', badgeBorder: '#f59e0b',
+    badgeColor: '#fcd34d', label: '⚠️ Medium Risk',
+    insight: 'Moderate default probability. Consider requesting additional documentation or a co-applicant.'
+  };
+  return {
+    stroke: '#ef4444', badgeBg: 'rgba(239,68,68,0.12)', badgeBorder: '#ef4444',
+    badgeColor: '#fca5a5', label: '🚨 High Risk',
+    insight: 'High default probability. Loan may require collateral, higher interest rate, or rejection.'
+  };
+}
+
+// ── Gauge update ──────────────────────────────────────────────────────────────
+function updateGauge(prob) {
+  const circumference = 2 * Math.PI * 66;
+  const fill   = document.getElementById('gauge-fill');
+  const pctEl  = document.getElementById('gauge-pct');
+  const badge  = document.getElementById('risk-badge');
+  const insight = document.getElementById('insight-box');
+  const cfg    = riskConfig(prob);
+
+  fill.style.strokeDasharray  = circumference;
+  fill.style.strokeDashoffset = circumference * (1 - prob);
+  fill.style.stroke = cfg.stroke;
+
+  pctEl.textContent = (prob * 100).toFixed(1) + '%';
+  pctEl.style.color = cfg.badgeColor;
+
+  badge.textContent    = cfg.label;
+  badge.style.background   = cfg.badgeBg;
+  badge.style.borderColor  = cfg.badgeBorder + '88';
+  badge.style.color        = cfg.badgeColor;
+
+  insight.textContent = cfg.insight;
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+function renderHistory(items) {
+  const list  = document.getElementById('history-list');
+  const empty = document.getElementById('history-empty');
+  if (!items || items.length === 0) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  [...list.children].forEach(c => { if (c !== empty) list.removeChild(c); });
+
+  items.slice(0, 6).forEach(rec => {
+    const prob   = parseFloat(rec.prediction);
+    const isErr  = rec.error || isNaN(prob);
+    const cfg    = isErr ? { badgeColor: '#fca5a5', label: 'Error' } : riskConfig(prob);
+    const ts     = new Date(rec.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const income = rec.inputs ? (rec.inputs.AMT_INCOME_TOTAL || '—') : '—';
+
+    const el = document.createElement('div');
+    el.className = 'history-item';
+    el.innerHTML = `
+      <div>
+        <div class="history-label">Income: ${Number(income).toLocaleString()}</div>
+        <div class="history-meta">${ts} · ${isErr ? 'Error' : cfg.label}</div>
+      </div>
+      <div class="history-prob" style="color:${cfg.badgeColor}">
+        ${isErr ? '✕' : (prob * 100).toFixed(1) + '%'}
+      </div>`;
+    list.insertBefore(el, list.firstChild);
+  });
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats(stats) {
+  document.getElementById('s-total').textContent = stats.total_predictions ?? 0;
+  const avg = stats.avg_score != null ? (parseFloat(stats.avg_score)*100).toFixed(1)+'%' : '—';
+  document.getElementById('s-avg').textContent = avg;
+  // Count high-risk from history separately — /stats returns avg of raw prob
+  document.getElementById('s-high').textContent = '—';
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('error-toast');
+  t.textContent = '⚠️ ' + msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 4500);
+}
+
+// ── Sidebar refresh ───────────────────────────────────────────────────────────
+async function refreshSidebar() {
+  try {
+    const [h, s] = await Promise.all([fetch('/history?n=6'), fetch('/stats')]);
+    if (h.ok)  renderHistory((await h.json()).history);
+    if (s.ok)  updateStats(await s.json());
+  } catch (_) {}
+}
+
+// ── Form submit ───────────────────────────────────────────────────────────────
+const form = document.getElementById('assess-form');
+const btn  = document.getElementById('assess-btn');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btn.disabled = true;
+  btn.classList.add('loading');
+
+  try {
+    const res  = await fetch('/predict', { method: 'POST', body: new FormData(form) });
+    const data = await res.json();
+
+    if (res.ok && data.status === 'ok') {
+      const prob = parseFloat(data.probability) / 100;
+      if (!isNaN(prob)) updateGauge(prob);
+      else showToast(data.probability || 'Unexpected response');
+    } else {
+      showToast(data.error || `Server error (${res.status})`);
+    }
+    await refreshSidebar();
+  } catch (err) {
+    showToast('Network error — is the API server running?');
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+refreshSidebar();
+</script>
+</body>
+</html>
